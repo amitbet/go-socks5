@@ -117,45 +117,62 @@ func (s *Server) Serve(l net.Listener) error {
 	return nil
 }
 
-// ServeConn is used to serve a single connection.
-func (s *Server) ServeConn(conn net.Conn) error {
-	defer conn.Close()
+func PerformHandshake(conn net.Conn, authenticators []Authenticator) (*Request, error) {
 	bufConn := bufio.NewReader(conn)
 
 	// Read the version byte
 	version := []byte{0}
 	if _, err := bufConn.Read(version); err != nil {
-		s.config.Logger.Printf("[ERR] socks: Failed to get version byte: %v", err)
-		return err
+		//logger.Printf("[ERR] socks: Failed to get version byte: %v", err)
+		return nil, err
 	}
 
 	// Ensure we are compatible
 	if version[0] != socks5Version {
 		err := fmt.Errorf("Unsupported SOCKS version: %v", version)
-		s.config.Logger.Printf("[ERR] socks: %v", err)
-		return err
+		//logger.Printf("[ERR] socks: %v", err)
+		return nil, err
+	}
+
+	authMethods := make(map[uint8]Authenticator)
+
+	for _, a := range authenticators {
+		authMethods[a.GetCode()] = a
 	}
 
 	// Authenticate the connection
-	authContext, err := s.authenticate(conn, bufConn)
+	authContext, err := authenticate(conn, bufConn, authMethods)
 	if err != nil {
 		err = fmt.Errorf("Failed to authenticate: %v", err)
-		s.config.Logger.Printf("[ERR] socks: %v", err)
-		return err
+		//logger.Printf("[ERR] socks: %v", err)
+		return nil, err
 	}
 
 	request, err := NewRequest(bufConn)
 	if err != nil {
 		if err == unrecognizedAddrType {
 			if err := sendReply(conn, addrTypeNotSupported, nil); err != nil {
-				return fmt.Errorf("Failed to send reply: %v", err)
+				return nil, fmt.Errorf("Failed to send reply: %v", err)
 			}
 		}
-		return fmt.Errorf("Failed to read destination address: %v", err)
+		return nil, fmt.Errorf("Failed to read destination address: %v", err)
 	}
 	request.AuthContext = authContext
 	if client, ok := conn.RemoteAddr().(*net.TCPAddr); ok {
 		request.RemoteAddr = &AddrSpec{IP: client.IP, Port: client.Port}
+	}
+	return request, nil
+}
+
+// ServeConn is used to serve a single connection.
+func (s *Server) ServeConn(conn net.Conn) error {
+	defer conn.Close()
+
+	request, err := PerformHandshake(conn, s.config.AuthMethods)
+	if err != nil {
+		err = fmt.Errorf("Failed on socks5 handshake: %v", err)
+		s.config.Logger.Printf("[ERR] socks: %v", err)
+		return err
 	}
 
 	// Process the client request

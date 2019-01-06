@@ -110,7 +110,7 @@ func (a UserPassAuthenticator) Authenticate(reader io.Reader, writer io.Writer) 
 }
 
 // authenticate is used to handle connection authentication
-func (s *Server) authenticate(conn io.Writer, bufConn io.Reader) (*AuthContext, error) {
+func authenticate(conn io.Writer, bufConn io.Reader, authMethods map[uint8]Authenticator) (*AuthContext, error) {
 	// Get the methods
 	methods, err := readMethods(bufConn)
 	if err != nil {
@@ -119,7 +119,7 @@ func (s *Server) authenticate(conn io.Writer, bufConn io.Reader) (*AuthContext, 
 
 	// Select a usable method
 	for _, method := range methods {
-		cator, found := s.authMethods[method]
+		cator, found := authMethods[method]
 		if found {
 			return cator.Authenticate(bufConn, conn)
 		}

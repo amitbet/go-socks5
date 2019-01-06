@@ -1,6 +1,7 @@
 package socks5
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -43,9 +44,10 @@ type AddressRewriter interface {
 // AddrSpec is used to return the target AddrSpec
 // which may be specified as IPv4, IPv6, or a FQDN
 type AddrSpec struct {
-	FQDN string
-	IP   net.IP
-	Port int
+	AddressType byte
+	FQDN        string
+	IP          net.IP
+	Port        int
 }
 
 func (a *AddrSpec) String() string {
@@ -70,6 +72,8 @@ type Request struct {
 	Version uint8
 	// Requested command
 	Command uint8
+	// reserved header byte
+	Reserved uint8
 	// AuthContext provided during negotiation
 	AuthContext *AuthContext
 	// AddrSpec of the the network that sent the request
@@ -108,11 +112,22 @@ func NewRequest(bufConn io.Reader) (*Request, error) {
 	request := &Request{
 		Version:  socks5Version,
 		Command:  header[1],
+		Reserved: header[2],
 		DestAddr: dest,
 		bufConn:  bufConn,
 	}
 
 	return request, nil
+}
+
+// WriteTo writes the request to the given writer
+func (r *Request) WriteTo(w io.Writer) error {
+	header := []byte{r.Version, r.Command, r.Reserved}
+	_, err := w.Write(header)
+	if err != nil {
+		return err
+	}
+	return writeAddrSpec(w, r.DestAddr)
 }
 
 // handleRequest is used for request processing after authentication
@@ -251,6 +266,41 @@ func (s *Server) handleAssociate(ctx context.Context, conn conn, req *Request) e
 	return nil
 }
 
+func writeAddrSpec(w io.Writer, addr *AddrSpec) error {
+	// write address type
+	_, err := w.Write([]byte{addr.AddressType})
+	if err != nil {
+		return err
+	}
+	// write address
+	switch addr.AddressType {
+	case ipv4Address:
+		_, err = w.Write(addr.IP)
+	case ipv6Address:
+		_, err = w.Write(addr.IP)
+	case fqdnAddress:
+		err = WriteShortString(w, addr.FQDN)
+	}
+	if err != nil {
+		return err
+	}
+
+	// write port
+	arr := []byte{0, 0}
+	binary.BigEndian.PutUint16(arr, uint16(addr.Port))
+
+	// arr[0] = byte(addr.Port & (0xff))
+	// b := addr.Port >> 2
+	// arr[1] = byte(b & (0xff))
+	_, err = w.Write(arr)
+	if err != nil {
+		return err
+	}
+
+	// no error
+	return nil
+}
+
 // readAddrSpec is used to read AddrSpec.
 // Expects an address type byte, follwed by the address and port
 func readAddrSpec(r io.Reader) (*AddrSpec, error) {
@@ -258,12 +308,14 @@ func readAddrSpec(r io.Reader) (*AddrSpec, error) {
 
 	// Get the address type
 	addrType := []byte{0}
+
 	if _, err := r.Read(addrType); err != nil {
 		return nil, err
 	}
+	d.AddressType = addrType[0]
 
 	// Handle on a per type basis
-	switch addrType[0] {
+	switch d.AddressType {
 	case ipv4Address:
 		addr := make([]byte, 4)
 		if _, err := io.ReadAtLeast(r, addr, len(addr)); err != nil {

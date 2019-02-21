@@ -119,6 +119,7 @@ func (s *Server) Serve(l net.Listener) error {
 
 func PerformHandshake(conn net.Conn, authenticators []Authenticator) (*Request, error) {
 	bufConn := bufio.NewReader(conn)
+	//bufConn := conn
 
 	// Read the version byte
 	version := []byte{0}
@@ -176,7 +177,7 @@ func (s *Server) ServeConn(conn net.Conn) error {
 	}
 
 	// Process the client request
-	if err := s.handleRequest(request, conn); err != nil {
+	if err := s.HandleRequest(request, conn); err != nil {
 		err = fmt.Errorf("Failed to handle request: %v", err)
 		s.config.Logger.Printf("[ERR] socks: %v", err)
 		return err

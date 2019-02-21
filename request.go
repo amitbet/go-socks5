@@ -130,8 +130,8 @@ func (r *Request) WriteTo(w io.Writer) error {
 	return writeAddrSpec(w, r.DestAddr)
 }
 
-// handleRequest is used for request processing after authentication
-func (s *Server) handleRequest(req *Request, conn conn) error {
+// HandleRequest is used for request processing after authentication
+func (s *Server) HandleRequest(req *Request, conn conn) error {
 	ctx := context.Background()
 
 	// Resolve the address if we have a FQDN
